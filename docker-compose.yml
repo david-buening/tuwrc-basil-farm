@@ -1,0 +1,24 @@
+services:
+  lerobot:
+    build: .
+    container_name: lerobot_container
+    platform: linux/arm64
+    volumes:
+      - .:/workspace
+      - install:/workspace/install
+    environment:
+      - DISPLAY=:1
+      - QT_X11_NO_MITSHM=1
+      - LIBGL_ALWAYS_SOFTWARE=1
+    ports:
+      - "6080:6080"
+      - "5901:5901"
+      - "3000:3000"
+    stdin_open: true
+    tty: true
+    shm_size: '4g'
+    restart: unless-stopped
+    command: /usr/local/bin/docker-entrypoint.sh
+
+volumes:
+  install:
