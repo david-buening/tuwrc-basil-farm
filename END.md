@@ -1,95 +1,95 @@
-# GitHub Push-Anleitung
+# GitHub Push Guide
 
-Du hast **zwei separate Git-Repos**, die du unabhängig pushen musst.
-
----
-
-## Warum zwei Repos?
-
-| Ordner | GitHub-Repo | Inhalt |
-|--------|-------------|--------|
-| `Robot_Arm/` | `david-buening/robot-arm-basil` | Dockerfile, docker-compose, START.md, Tagebuch, etc. |
-| `Robot_Arm/lerobot/` | `david-buening/lerobot` | Dein Fork mit dem ganzen ROS-Code (URDF, Controller, GUI, ...) |
-
-Das äußere Repo (`robot-arm-basil`) behandelt `lerobot/` als **Git-Submodul** — es speichert nur einen Zeiger auf einen bestimmten Commit des inneren Repos, nicht den Code selbst. Deshalb musst du **immer zuerst den inneren Repo pushen**, dann den äußeren.
+You have **two separate Git repositories** that must be pushed independently.
 
 ---
 
-## Schritt 1 — Änderungen im `lerobot`-Repo pushen
+## Why two repositories?
+
+| Folder | GitHub repository | Content |
+|--------|-------------------|---------|
+| `Robot_Arm_Team/` | `david-buening/robot-arm-basil` | Dockerfile, docker-compose, START.md, Diary.md, etc. |
+| `Robot_Arm_Team/lerobot/` | `david-buening/lerobot` | Your fork with all ROS code (URDF, controllers, GUI, etc.) |
+
+The outer repository (`robot-arm-basil`) treats `lerobot/` as a **Git submodule**. It stores only a pointer to a specific commit of the inner repository, not the inner source code itself. That means you must **always push the inner repository first**, then push the outer repository.
+
+---
+
+## Step 1 - Push changes in the `lerobot` repository
 
 ```bash
-cd ~/Desktop/TUWRC/Robot_Arm/lerobot
+cd ~/Desktop/TUWRC/Robot_Arm_Team/lerobot
 ```
 
-Geänderte Dateien anzeigen:
+Show changed files:
 ```bash
 git status
 ```
 
-Änderungen stagen (entweder einzelne Dateien oder alles):
+Stage changes, either specific files or everything:
 ```bash
 git add src/lerobot_gui/lerobot_gui/joint_state_gui.py
 git add src/lerobot_gui/package.xml
-# oder alles auf einmal:
+# or everything at once:
 git add .
 ```
 
-Commit erstellen:
+Create a commit:
 ```bash
-git commit -m "Kurze Beschreibung was du geändert hast"
+git commit -m "Short description of what changed"
 ```
 
-Pushen:
+Push:
 ```bash
 git push origin main
 ```
 
 ---
 
-## Schritt 2 — Submodul-Zeiger + äußeres Repo pushen
+## Step 2 - Push the submodule pointer and the outer repository
 
 ```bash
-cd ~/Desktop/TUWRC/Robot_Arm
+cd ~/Desktop/TUWRC/Robot_Arm_Team
 ```
 
-Status anzeigen:
+Show status:
 ```bash
 git status
 ```
 
-Du wirst so etwas sehen:
-```
- m lerobot          ← Submodul hat neue Commits
-?? test_pose.py     ← neue Dateien
- M Dockerfile       ← geänderte Dateien
+You will see something like this:
+```text
+ m lerobot          <- submodule has new commits
+?? test_pose.py     <- new files
+ M Dockerfile       <- changed files
 ```
 
-Alles stagen:
+Stage everything:
 ```bash
-git add lerobot         # Submodul-Zeiger aktualisieren
-git add .               # alle anderen neuen/geänderten Dateien
+git add lerobot         # update the submodule pointer
+git add .               # add all other new or changed files
 ```
 
-Commit erstellen:
+Create a commit:
 ```bash
-git commit -m "Kurze Beschreibung was du geändert hast"
+git commit -m "Short description of what changed"
 ```
 
-Pushen:
+Push:
 ```bash
 git push origin master
 ```
 
 ---
 
-## Einmalige Fixes (nur einmal nötig)
+## One-time fixes
 
-### `.gitmodules`-Datei fehlt
+### Missing `.gitmodules` file
 
-Ohne diese Datei weiß Git nicht, wo `lerobot/` zu finden ist, wenn jemand das Repo neu klont. Einmal ausführen:
+Without this file, Git does not know where to find `lerobot/` when someone clones the repository. Run this once:
 
 ```bash
-cd ~/Desktop/TUWRC/Robot_Arm
+cd ~/Desktop/TUWRC/Robot_Arm_Team
 cat > .gitmodules << 'EOF'
 [submodule "lerobot"]
     path = lerobot
@@ -102,38 +102,38 @@ git push origin master
 
 ---
 
-## Komplett-Workflow in einem Rutsch
+## Full workflow in one pass
 
 ```bash
-# 1. Inneres Repo
-cd ~/Desktop/TUWRC/Robot_Arm/lerobot
+# 1. Inner repository
+cd ~/Desktop/TUWRC/Robot_Arm_Team/lerobot
 git add .
-git commit -m "Was auch immer du geändert hast"
+git commit -m "Short description of what changed"
 git push origin main
 
-# 2. Äußeres Repo
-cd ~/Desktop/TUWRC/Robot_Arm
+# 2. Outer repository
+cd ~/Desktop/TUWRC/Robot_Arm_Team
 git add .
-git commit -m "Update lerobot submodule + ..."
+git commit -m "Update lerobot submodule and project files"
 git push origin master
 ```
 
 ---
 
-## Häufige Fehler
+## Common errors
 
-| Fehler | Ursache | Lösung |
-|--------|---------|--------|
-| `git push` schlägt fehl (rejected) | Jemand hat direkt auf GitHub gepusht | `git pull origin main` zuerst |
-| `lerobot` taucht nicht in `git status` auf | Submodul hat keine neuen Commits | Normal, nichts zu tun |
-| Neues Gerät — `lerobot/` Ordner ist leer | Submodul wurde nicht initialisiert | `git submodule update --init` |
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `git push` fails with `rejected` | Someone pushed directly to GitHub | Run `git pull origin main` first |
+| `lerobot` does not appear in `git status` | The submodule has no new commits | Normal, nothing to do |
+| New machine and the `lerobot/` folder is empty | The submodule was not initialized | Run `git submodule update --init` |
 
 ---
 
-## Übersicht der Remote-URLs
+## Remote URL Overview
 
-```
+```text
 robot-arm-basil:  https://github.com/david-buening/robot-arm-basil.git
 lerobot (fork):   https://github.com/david-buening/lerobot.git
-lerobot (origin): https://github.com/jb-balaji/lerobot  (nur lesen, kein push)
+lerobot (origin): https://github.com/jb-balaji/lerobot  (read-only, do not push)
 ```
