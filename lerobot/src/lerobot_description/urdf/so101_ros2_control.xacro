@@ -1,10 +1,20 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
 
+    <xacro:arg name="is_sim" default="true"/>
+
     <ros2_control name="RobotSystem" type="system">
-        <!-- ros2_control Gazebo -->
+
         <hardware>
-            <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+            <xacro:if value="$(arg is_sim)">
+                <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+            </xacro:if>
+            <xacro:unless value="$(arg is_sim)">
+                <!-- Real arm: Feetech STS3215 servos over USB serial -->
+                <plugin>lerobot_hardware/SO101HardwareInterface</plugin>
+                <param name="serial_port">/dev/ttyUSB0</param>
+                <param name="baud_rate">1000000</param>
+            </xacro:unless>
         </hardware>
 
         <joint name="1">
@@ -38,6 +48,7 @@
             </command_interface>
             <state_interface name="position" />
         </joint>
+
         <joint name="5">
             <command_interface name="position">
                 <param name="min">-2.79253</param>
@@ -53,6 +64,7 @@
             </command_interface>
             <state_interface name="position" />
         </joint>
+
     </ros2_control>
 
 </robot>

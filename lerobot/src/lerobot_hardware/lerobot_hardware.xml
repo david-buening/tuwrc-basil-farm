@@ -1,0 +1,7 @@
+<library path="lerobot_hardware">
+  <class name="lerobot_hardware/SO101HardwareInterface"
+         type="lerobot_hardware::SO101HardwareInterface"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>ros2_control hardware interface for SO-101 (Feetech STS3215 servos over USB serial)</description>
+  </class>
+</library>

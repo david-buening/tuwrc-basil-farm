@@ -263,3 +263,162 @@ Startup was simplified as well:
 - `start.sh` now starts Docker, Gazebo, controllers, MoveIt, and the web GUI.
 - Because of this, end-effector position control should work directly after running `./start.sh`.
 - `START.md` was updated accordingly.
+
+# May 17 Status — Real Hardware Driver
+
+## What was added
+
+The missing ros2_control hardware driver for the real SO-101 arm was implemented.
+Until now, the stack only ran in Gazebo simulation. The Gazebo simulation continues to work unchanged.
+
+### New package: `lerobot/src/lerobot_hardware`
+
+A new ROS 2 package `lerobot_hardware` was created. It contains a `ros2_control` hardware interface (`SystemInterface`) that communicates directly with the Feetech STS3215 servos over USB serial using the SCS binary protocol.
+
+What it does:
+- Opens the USB serial port (default `/dev/ttyUSB0`) at 1 Mbaud.
+- On activation: pings all 6 servos and reads their current positions so the arm does not jump.
+- `read()`: reads the current position of each servo (register `0x38`, 2 bytes, little-endian), converts steps → radians.
+- `write()`: converts radians → steps, writes the goal position to each servo (register `0x2A`).
+- Step encoding: 4096 steps per revolution, center (0 rad) = step 2048.
+
+Files created:
+- `include/lerobot_hardware/so101_hardware_interface.hpp`
+- `src/so101_hardware_interface.cpp`
+- `CMakeLists.txt`, `package.xml`, `lerobot_hardware.xml`
+
+### Modified files
+
+**`lerobot_description/urdf/so101_ros2_control.xacro`**
+
+Added a `is_sim` xacro argument (default `true`). Depending on the value, either the Gazebo plugin or the real hardware plugin is loaded:
+```xml
+<xacro:if value="$(arg is_sim)">
+    <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+</xacro:if>
+<xacro:unless value="$(arg is_sim)">
+    <plugin>lerobot_hardware/SO101HardwareInterface</plugin>
+    <param name="serial_port">/dev/ttyUSB0</param>
+    <param name="baud_rate">1000000</param>
+</xacro:unless>
+```
+
+**`lerobot_description/urdf/so101.urdf.xacro`**
+
+Added `<xacro:arg name="is_sim" default="true"/>` so the argument is accepted at the top level and flows through to included files.
+
+**`lerobot_controller/launch/so101_controller.launch.py`**
+
+Now passes `is_sim` to xacro when generating the robot description:
+```python
+Command(["xacro ", urdf_path, " is_sim:=", is_sim])
+```
+
+### Simulation is unchanged
+
+`so101_gazebo.launch.py` calls xacro without an `is_sim` argument, so the default `true` applies and the Gazebo plugin is used as before. All existing Docker / Gazebo commands from the previous entries continue to work.
+
+---
+
+## What still needs to be done to control the real arm via localhost:3000
+
+The following steps are required on a Linux Ubuntu 24.04 machine with the arm connected via USB.
+
+### Step 1 — Install ROS 2 Jazzy natively
+
+```bash
+sudo apt install software-properties-common
+sudo add-apt-repository universe
+sudo apt update && sudo apt install curl -y
+sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | \
+  sudo gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
+  http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | \
+  sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+sudo apt update
+sudo apt install -y ros-jazzy-desktop ros-jazzy-ros2-control \
+  ros-jazzy-ros2-controllers ros-jazzy-moveit \
+  ros-jazzy-gz-ros2-control ros-jazzy-ros-gz \
+  python3-colcon-common-extensions python3-rosdep
+```
+
+### Step 2 — Clone the repo and build
+
+```bash
+git clone <repo-url> ~/Robot_Arm_Team
+cd ~/Robot_Arm_Team/lerobot
+source /opt/ros/jazzy/setup.bash
+rosdep update
+rosdep install --from-paths src --ignore-src -r -y
+colcon build
+```
+
+Add auto-sourcing to `.bashrc` so every new terminal is ready:
+```bash
+echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc
+echo "source ~/Robot_Arm_Team/lerobot/install/setup.bash" >> ~/.bashrc
+source ~/.bashrc
+```
+
+### Step 3 — USB permissions (once)
+
+Without this, the serial port cannot be opened without sudo:
+```bash
+sudo usermod -aG dialout $USER
+# Log out and back in once after this
+```
+
+Check that the arm is visible after plugging in USB:
+```bash
+ls /dev/ttyUSB*
+# Expected: /dev/ttyUSB0
+```
+
+If the port is different (e.g. `ttyUSB1` or `ttyACM0`), update `serial_port` in:
+`lerobot/src/lerobot_description/urdf/so101_ros2_control.xacro` line 19, then rebuild.
+
+### Step 4 — Start the real arm stack (3 terminals)
+
+**Terminal 1 — Controller Manager + hardware driver:**
+```bash
+ros2 launch lerobot_controller so101_controller.launch.py is_sim:=false
+```
+This starts `ros2_control_node` with the real hardware plugin, which opens `/dev/ttyUSB0` and pings all 6 servos. Check that all controllers are active:
+```bash
+ros2 control list_controllers
+# Expected: joint_state_broadcaster active, arm_controller active, gripper_controller active
+```
+
+**Terminal 2 — MoveIt (needed for X/Y/Z position control in the GUI):**
+```bash
+ros2 launch lerobot_moveit so101_moveit.launch.py
+```
+
+**Terminal 3 — Web GUI:**
+```bash
+ros2 run lerobot_gui joint_state_gui
+```
+
+Open in browser: http://localhost:3000
+
+### Step 5 — Verify
+
+In the GUI, click `Fill current` to load the arm's current position into the target fields.
+Make a small change (e.g. joint 1 by a few degrees) and click `Send`.
+The real arm should move.
+
+---
+
+## Architecture summary (real arm)
+
+```
+Browser (localhost:3000)
+    ↓ HTTP POST /send  or  /send_pose
+lerobot_gui  (joint_state_gui.py)
+    ↓ JointTrajectory topic
+JointTrajectoryController  (ros2_control)
+    ↓ position commands at 10 Hz
+SO101HardwareInterface  (lerobot_hardware)
+    ↓ SCS serial protocol over USB
+Feetech STS3215 Servos (Joints 1–6)
+```
