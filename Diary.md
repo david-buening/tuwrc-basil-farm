@@ -422,3 +422,19 @@ SO101HardwareInterface  (lerobot_hardware)
     ↓ SCS serial protocol over USB
 Feetech STS3215 Servos (Joints 1–6)
 ```
+
+# May 27 Status
+
+## Fixed Docker build issue in `lerobot_description`
+
+### Problem
+
+`lerobot_description/CMakeLists.txt` still installed a `config` directory although `lerobot_description/config` no longer exists in the repository.
+
+### Fix
+
+Removed `config` from the `install(DIRECTORY ...)` section in `lerobot_description/CMakeLists.txt`.
+
+### Result
+
+`colcon build` inside the Docker container now continues past `lerobot_description` successfully.
