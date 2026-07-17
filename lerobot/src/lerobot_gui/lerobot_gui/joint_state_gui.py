@@ -19,7 +19,10 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 ARM_JOINTS = {"1", "2", "3", "4", "5"}
 GRIPPER_JOINTS = {"6"}
-BASE_FRAME = "base"
+LINEAR_JOINTS = {"rail_joint"}  # prismatic, values in meters (not radians)
+# Pose reference frame: must be a FIXED frame. "base" moves with the rail
+# carriage now, so targets/display are expressed in "world" instead.
+BASE_FRAME = "world"
 END_EFFECTOR_FRAME = "gripper"
 MOVEIT_IK_SERVICE = "/compute_ik"
 MOVEIT_GROUP = "arm"
@@ -156,10 +159,10 @@ HTML_PAGE = """<!doctype html>
       <thead>
         <tr>
           <th>Joint</th>
-          <th>Position rad</th>
+          <th>Position rad/m</th>
           <th>Position deg</th>
           <th>Velocity</th>
-          <th class="divider">Target deg</th>
+          <th class="divider">Target deg/m</th>
           <th>Range</th>
         </tr>
       </thead>
@@ -181,7 +184,7 @@ HTML_PAGE = """<!doctype html>
     <section id="pose-section" hidden>
       <h2 class="section-title">
         End Effector Pose
-        <span class="section-meta" id="pose-frame">base → gripper</span>
+        <span class="section-meta" id="pose-frame">world → gripper</span>
       </h2>
       <table id="pose-table">
         <thead>
@@ -207,15 +210,15 @@ HTML_PAGE = """<!doctype html>
           </tr>
           <tr>
             <td><strong>Roll</strong> <span class="limit-hint">rotation around X axis</span></td><td id="pose-roll">—</td>
-            <td class="divider"><span class="limit-hint">not targeted</span></td><td>deg</td>
+            <td class="divider"><input type="number" class="target-input" id="pose-target-roll" value="0.0000" step="1"></td><td>deg</td>
           </tr>
           <tr>
             <td><strong>Pitch</strong> <span class="limit-hint">rotation around Y axis</span></td><td id="pose-pitch">—</td>
-            <td class="divider"><span class="limit-hint">not targeted</span></td><td>deg</td>
+            <td class="divider"><input type="number" class="target-input" id="pose-target-pitch" value="0.0000" step="1"></td><td>deg</td>
           </tr>
           <tr>
             <td><strong>Yaw</strong> <span class="limit-hint">rotation around Z axis</span></td><td id="pose-yaw">—</td>
-            <td class="divider"><span class="limit-hint">not targeted</span></td><td>deg</td>
+            <td class="divider"><input type="number" class="target-input" id="pose-target-yaw" value="0.0000" step="1"></td><td>deg</td>
           </tr>
         </tbody>
       </table>
@@ -234,8 +237,10 @@ HTML_PAGE = """<!doctype html>
   </main>
 
   <script>
-    const JOINT_ORDER  = ["1", "2", "3", "4", "5", "6"];
+    const JOINT_ORDER  = ["rail_joint", "1", "2", "3", "4", "5", "6"];
+    const LINEAR_JOINTS = new Set(["rail_joint"]);   // prismatic, values in meters
     const JOINT_LIMITS = {
+      "rail_joint": [-0.5, 0.5],
       "1": [-110, 110], "2": [-100, 100], "3": [-100, 90],
       "4": [-95,   95], "5": [-160, 160], "6": [-10, 100],
     };
@@ -269,7 +274,10 @@ HTML_PAGE = """<!doctype html>
       const names = JOINT_ORDER.filter(n => joints.some(j => j.name === n));
       rowsEl.innerHTML = "";
       for (const name of names) {
+        const linear = LINEAR_JOINTS.has(name);
         const [lo, hi] = JOINT_LIMITS[name] || [-180, 180];
+        const unit = linear ? "m" : "°";
+        const step = linear ? 0.01 : 0.5;
         const tr = document.createElement("tr");
         tr.innerHTML = `
           <td><strong>${name}</strong></td>
@@ -279,10 +287,10 @@ HTML_PAGE = """<!doctype html>
           <td class="divider">
             <div class="target-cell">
               <input type="number" class="target-input" id="t-${name}"
-                     value="0.00" step="0.5" min="${lo}" max="${hi}">
+                     value="0.00" step="${step}" min="${lo}" max="${hi}">
             </div>
           </td>
-          <td><span class="limit-hint">${lo}° … ${hi}°</span></td>
+          <td><span class="limit-hint">${lo}${unit} … ${hi}${unit}</span></td>
         `;
         rowsEl.appendChild(tr);
       }
@@ -291,12 +299,13 @@ HTML_PAGE = """<!doctype html>
 
     function updateRows(joints) {
       for (const j of joints) {
-        currentDeg[j.name] = j.position_deg;
+        const linear = LINEAR_JOINTS.has(j.name);
+        currentDeg[j.name] = linear ? j.position : j.position_deg;
         const r = document.getElementById(`r-${j.name}`);
         const d = document.getElementById(`d-${j.name}`);
         const v = document.getElementById(`v-${j.name}`);
         if (r) r.textContent = fmt(j.position);
-        if (d) d.textContent = fmt(j.position_deg, 2);
+        if (d) d.textContent = linear ? "—" : fmt(j.position_deg, 2);
         if (v) v.textContent = fmt(j.velocity);
       }
     }
@@ -370,6 +379,9 @@ HTML_PAGE = """<!doctype html>
       document.getElementById("pose-target-x").value = currentPose.x.toFixed(4);
       document.getElementById("pose-target-y").value = currentPose.y.toFixed(4);
       document.getElementById("pose-target-z").value = currentPose.z.toFixed(4);
+      document.getElementById("pose-target-roll").value  = currentPose.roll_deg.toFixed(2);
+      document.getElementById("pose-target-pitch").value = currentPose.pitch_deg.toFixed(2);
+      document.getElementById("pose-target-yaw").value   = currentPose.yaw_deg.toFixed(2);
     }
 
     poseFillBtn.addEventListener("click", fillPoseTargetsFromCurrent);
@@ -378,6 +390,9 @@ HTML_PAGE = """<!doctype html>
       document.getElementById("pose-target-x").value = "0.0000";
       document.getElementById("pose-target-y").value = "0.0000";
       document.getElementById("pose-target-z").value = "0.0000";
+      document.getElementById("pose-target-roll").value  = "0.0000";
+      document.getElementById("pose-target-pitch").value = "0.0000";
+      document.getElementById("pose-target-yaw").value   = "0.0000";
     });
 
     poseSendBtn.addEventListener("click", async () => {
@@ -385,6 +400,9 @@ HTML_PAGE = """<!doctype html>
         x: parseFloat(document.getElementById("pose-target-x").value),
         y: parseFloat(document.getElementById("pose-target-y").value),
         z: parseFloat(document.getElementById("pose-target-z").value),
+        roll:  parseFloat(document.getElementById("pose-target-roll").value),
+        pitch: parseFloat(document.getElementById("pose-target-pitch").value),
+        yaw:   parseFloat(document.getElementById("pose-target-yaw").value),
       };
       const duration = parseFloat(document.getElementById("pose-duration").value) || 2.0;
 
@@ -535,7 +553,7 @@ class JointStateNode(Node):
         }
 
     def send_trajectory(self, targets_rad: dict, duration_sec: float):
-        arm     = {k: v for k, v in targets_rad.items() if k in ARM_JOINTS}
+        arm     = {k: v for k, v in targets_rad.items() if k in ARM_JOINTS or k in LINEAR_JOINTS}
         gripper = {k: v for k, v in targets_rad.items() if k in GRIPPER_JOINTS}
         dur = Duration(
             sec=int(duration_sec),
@@ -565,7 +583,14 @@ class JointStateNode(Node):
         pose.pose.position.x = float(pose_target["x"])
         pose.pose.position.y = float(pose_target["y"])
         pose.pose.position.z = float(pose_target["z"])
-        pose.pose.orientation.w = 1.0
+        roll  = math.radians(float(pose_target.get("roll", 0.0)))
+        pitch = math.radians(float(pose_target.get("pitch", 0.0)))
+        yaw   = math.radians(float(pose_target.get("yaw", 0.0)))
+        qx, qy, qz, qw = euler_to_quaternion(roll, pitch, yaw)
+        pose.pose.orientation.x = qx
+        pose.pose.orientation.y = qy
+        pose.pose.orientation.z = qz
+        pose.pose.orientation.w = qw
 
         request = GetPositionIK.Request()
         request.ik_request.group_name = MOVEIT_GROUP
@@ -594,7 +619,7 @@ class JointStateNode(Node):
                 response.solution.joint_state.name,
                 response.solution.joint_state.position,
             )
-            if name in ARM_JOINTS
+            if name in ARM_JOINTS or name in LINEAR_JOINTS
         }
         if not solution:
             raise RuntimeError("MoveIt IK returned no arm joint solution.")
@@ -617,9 +642,12 @@ def make_request_handler(store: JointStateStore, node: JointStateNode):
                 try:
                     length = int(self.headers.get("Content-Length", 0))
                     body = json.loads(self.rfile.read(length))
-                    joints_deg = body.get("joints", {})
+                    joints_in  = body.get("joints", {})
                     duration   = float(body.get("duration", 2.0))
-                    joints_rad = {k: math.radians(float(v)) for k, v in joints_deg.items()}
+                    joints_rad = {
+                        k: (float(v) if k in LINEAR_JOINTS else math.radians(float(v)))
+                        for k, v in joints_in.items()
+                    }
                     node.send_trajectory(joints_rad, duration)
                     self._json({"ok": True})
                 except Exception as exc:
@@ -689,6 +717,21 @@ def quaternion_to_euler(x, y, z, w):
     yaw = math.atan2(siny_cosp, cosy_cosp)
 
     return roll, pitch, yaw
+
+
+def euler_to_quaternion(roll, pitch, yaw):
+    cy = math.cos(yaw * 0.5)
+    sy = math.sin(yaw * 0.5)
+    cp = math.cos(pitch * 0.5)
+    sp = math.sin(pitch * 0.5)
+    cr = math.cos(roll * 0.5)
+    sr = math.sin(roll * 0.5)
+
+    x = sr * cp * cy - cr * sp * sy
+    y = cr * sp * cy + sr * cp * sy
+    z = cr * cp * sy - sr * sp * cy
+    w = cr * cp * cy + sr * sp * sy
+    return x, y, z, w
 
 
 def moveit_error_message(code):

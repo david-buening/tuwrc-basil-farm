@@ -438,3 +438,39 @@ Removed `config` from the `install(DIRECTORY ...)` section in `lerobot_descripti
 ### Result
 
 `colcon build` inside the Docker container now continues past `lerobot_description` successfully.
+
+# July 17 Status — X-Rail as 6th DOF (prismatic joint)
+
+The SO-101 arm was extended with a linear X-axis (rail + carriage) as a new prismatic joint `rail_joint`. The arm now has 6 DOF, so full 6D end-effector poses (position + orientation) can be targeted.
+
+> **Note / known limitation:** The URDF extension is **not a 1:1 accurate model** of the real rail assembly. The rail and plate meshes were placed with hand-tuned offsets and rotations (eyeballed in RViz), the mesh scale (`0.0001`) is a workaround, masses/inertias are rough placeholder values, and the visual-only rail links have no proper collision geometry. If the rail is ever supposed to be represented fully realistically (correct geometry, mounting positions, and assembly of rail, carriage, and slider), the URDF needs another revision.
+
+## Changed files
+
+**`lerobot_description/urdf/so101_base.xacro`**
+- New link `rail_link`: two rail meshes (`meshes/rail/rail.stl`), 90 mm apart in Y, fixed to `world` via `world_to_rail` (raised by `z=0.085` so the rail bottom sits on the Gazebo ground instead of sinking into it — buried collision meshes make physics extremely slow).
+- New link `carriage_link`: the moving plate (`meshes/rail/plate.stl`).
+- New joint `rail_joint` (prismatic, axis X, range −0.5 m … +0.5 m, effort 50, velocity 1.0) between rail and carriage, plus a transmission.
+- `base_joint` now attaches the robot `base` to `carriage_link` (with a fine-tune offset of −3 cm in X, −7 cm in Z) instead of directly to `world` — the whole arm rides on the carriage.
+
+**`lerobot_description/meshes/rail/`** (new)
+- `rail.stl` and `plate.stl` meshes for the linear axis.
+
+**`lerobot_description/urdf/so101_ros2_control.xacro`**
+- Added `rail_joint` with position command interface (−0.5 … 0.5) and position state interface.
+
+**`lerobot_controller/config/so101_controllers.yaml`**
+- `rail_joint` added to the `arm_controller` joint list.
+
+**`lerobot_moveit/config/*`**
+- `so101.srdf`: planning group `arm` now starts at `rail_joint` (instead of the fixed `base_joint`), `rail_joint` added to the `home` state, and collision checking disabled between rail/carriage/base/shoulder pairs.
+- `joint_limits.yaml`, `initial_positions.yaml`, `moveit_controllers.yaml`: `rail_joint` registered everywhere.
+- `kinematics.yaml`: `position_only_ik` switched from `True` to `False` — with the rail as 6th DOF, MoveIt now solves full 6D poses including orientation.
+
+**`lerobot_gui/lerobot_gui/joint_state_gui.py`**
+- `rail_joint` added to the joint table; it is treated as a linear joint (values in **meters**, not degrees — separate handling in display, input step size, and the `/send` endpoint).
+- Pose reference frame switched from `base` to `world`, because `base` now moves with the carriage and is no longer a fixed frame.
+- Roll/Pitch/Yaw are no longer display-only: they are now editable target fields. The GUI converts them to a quaternion (`euler_to_quaternion`) and sends the full 6D pose to `/compute_ik`. The IK solution now also includes `rail_joint`.
+
+**`waypoint_runner.py`** (new, repo root)
+- Standalone script that drives the robot through a list of full 6D Cartesian waypoints (`x, y, z, roll, pitch, yaw` in the `world` frame): for each waypoint it calls MoveIt `/compute_ik` (which includes `rail_joint` via the `arm` group), sends the solution as a timed trajectory, waits until the pose is reached, then continues. Waypoints with failing IK are skipped with a warning instead of aborting.

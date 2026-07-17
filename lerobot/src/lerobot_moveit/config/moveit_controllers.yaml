@@ -12,6 +12,7 @@ moveit_simple_controller_manager:
     type: FollowJointTrajectory
     default: true
     joints:
+      - "rail_joint"
       - "1"
       - "2"
       - "3"

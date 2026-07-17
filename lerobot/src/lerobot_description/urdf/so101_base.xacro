@@ -6,15 +6,97 @@
   and has been modified accordingly.
 -->
 
+
+
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
 
 	<!-- Links -->
 	<link name="world" />
 
-	<joint name="base_joint" type="fixed">
+	<!-- ===================== X-Linearachse (6. DOF) ===================== -->
+
+	<!-- Statische Schiene (fest mit der Welt verbunden) -->
+	<link name="rail_link">
+		<!-- Rail 1. rpy dreht die Mesh-Laenge (Z) auf Welt-X; xyz zentriert die
+		     1 m lange Schiene um den Fahrweg und legt sie unter die Platte.
+		     Feinjustage in RViz. -->
+		<visual>
+			<origin xyz="-0.5 0 -0.085" rpy="1.5708 0 1.5708" />
+			<geometry>
+				<mesh filename="package://lerobot_description/meshes/rail/rail.stl"
+					scale="0.0001 0.0001 0.0001" />
+			</geometry>
+			<material name="3d_printed" />
+		</visual>
+		<!-- Rail 2, 90 mm in -Y versetzt -->
+		<visual>
+			<origin xyz="-0.5 -0.090 -0.085" rpy="1.5708 0 1.5708" />
+			<geometry>
+				<mesh filename="package://lerobot_description/meshes/rail/rail.stl"
+					scale="0.0001 0.0001 0.0001" />
+			</geometry>
+			<material name="3d_printed" />
+		</visual>
+		<inertial>
+			<origin xyz="0 0 0" rpy="0 0 0" />
+			<mass value="1.0" />
+			<inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01" />
+		</inertial>
+	</link>
+
+	<!-- z=0.085 hebt das Konstrukt an, damit die Rail-Unterkante (z=-0.085
+	     im rail-Frame) auf dem Gazebo-Boden (z=0) aufliegt statt darin zu
+	     versinken (vergrabene Kollisionsmeshes machen die Physik extrem langsam). -->
+	<joint name="world_to_rail" type="fixed">
 		<parent link="world" />
-		<child link="base" />
+		<child link="rail_link" />
+		<origin xyz="0 0 0.085" rpy="0 0 0" />
+	</joint>
+
+	<!-- Bewegter Schlitten (Platte + spaeter Slider) -->
+	<link name="carriage_link">
+		<!-- Platte 180 um Y gedreht (zeigt nach oben), dann zentriert:
+		     mittig in XY, Oberkante auf carriage-Frame. -->
+		<visual>
+			<origin xyz="0.070 -0.070 0" rpy="0 3.14159 0" />
+			<geometry>
+				<mesh filename="package://lerobot_description/meshes/rail/plate.stl"
+					scale="0.0001 0.0001 0.0001" />
+			</geometry>
+			<material name="3d_printed" />
+		</visual>
+		<inertial>
+			<origin xyz="0 0 0" rpy="0 0 0" />
+			<mass value="0.5" />
+			<inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001" />
+		</inertial>
+	</link>
+
+	<!-- Der neue 6. Freiheitsgrad: prismatisch entlang X -->
+	<joint name="rail_joint" type="prismatic">
+		<parent link="rail_link" />
+		<child link="carriage_link" />
 		<origin xyz="0 0 0" rpy="0 0 0" />
+		<axis xyz="1 0 0" />
+		<limit effort="50" velocity="1.0" lower="-0.5" upper="0.5" />
+	</joint>
+
+	<transmission name="rail_joint_trans">
+		<type>transmission_interface/SimpleTransmission</type>
+		<joint name="rail_joint">
+			<hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+		</joint>
+		<actuator name="motor_rail">
+			<hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+			<mechanicalReduction>1</mechanicalReduction>
+		</actuator>
+	</transmission>
+
+	<!-- Roboter sitzt auf der Platte. Feinjustage: 7 cm runter, 3 cm in -X. -->
+	<joint name="base_joint" type="fixed">
+		<parent link="carriage_link" />
+		<child link="base" />
+		<origin xyz="-0.03 0 -0.07" rpy="0 0 0" />
 	</joint>
 
 	<!-- Materials -->

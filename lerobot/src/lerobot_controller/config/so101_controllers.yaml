@@ -17,6 +17,7 @@ controller_manager:
 arm_controller:
   ros__parameters:
     joints:
+      - "rail_joint"
       - "1"
       - "2"
       - "3"
