@@ -433,6 +433,26 @@
 		</collision>
 	</link>
 
+	<!-- ===================== TCP (tool center point) =====================
+	     The `gripper` link frame comes from CAD and is awkward to command:
+	     its X axis points straight up in typical poses, which forces the
+	     RPY decomposition into pitch = -90 (gimbal lock) - roll and yaw then
+	     become ambiguous and the GUI shows different numbers than commanded.
+
+	     This frame fixes that by using the standard tool convention:
+	       TCP Z  = approach direction (out of the gripper, = gripper -Z)
+	       TCP X  = gripper +Y  (horizontal -> away from the singularity)
+	       TCP Y  = gripper +X
+	     Origin sits on the approach axis at the grasp point (fingertip is at
+	     gripper z = -0.105 m). Rotation rpy = (180deg, 0, 90deg). -->
+	<link name="tcp" />
+
+	<joint name="gripper_to_tcp" type="fixed">
+		<parent link="gripper" />
+		<child link="tcp" />
+		<origin xyz="0 0 -0.090" rpy="3.14159 0 1.5708" />
+	</joint>
+
 	<!-- Joint from gripper to jaw -->
 	<joint name="6" type="revolute">
 		<origin xyz="0.0202 0.0188 -0.0234" rpy="1.5708 -5.14108e-17 -1.38655e-14" />

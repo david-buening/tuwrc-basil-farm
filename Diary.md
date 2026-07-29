@@ -474,3 +474,170 @@ The SO-101 arm was extended with a linear X-axis (rail + carriage) as a new pris
 
 **`waypoint_runner.py`** (new, repo root)
 - Standalone script that drives the robot through a list of full 6D Cartesian waypoints (`x, y, z, roll, pitch, yaw` in the `world` frame): for each waypoint it calls MoveIt `/compute_ik` (which includes `rail_joint` via the `arm` group), sends the solution as a timed trajectory, waits until the pose is reached, then continues. Waypoints with failing IK are skipped with a warning instead of aborting.
+
+# July 29 Status — One-command startup for the rail setup
+
+`start.sh` still brings up the original 5-DOF robot. For the rail version there is now a separate script:
+
+```bash
+./start_rail.sh
+```
+
+It does everything from a cold start: Docker Desktop, container, build, Gazebo, controllers, MoveIt, web GUI — and verifies along the way that the setup actually came up.
+
+## Why a separate script and not just `start.sh`
+
+Two extra steps are needed for the rail, and both caused real debugging sessions before they were automated:
+
+**1. `colcon build` before launching (step 4).**
+Gazebo spawns the robot from `install/`, not from `src/`. Without a rebuild, every URDF/controller/MoveIt change is silently ignored and the *old* robot starts — it looks like the edit "did nothing".
+
+**2. Killing stale processes first (step 3).**
+A surviving `robot_state_publisher` or `joint_state_publisher` keeps serving the OLD robot description. The result is confusing: `rail_joint` is missing from `/joint_states` even though the URDF is correct. Ports and controller activation can also block.
+
+## Verification instead of just printing status
+
+- Step 7 polls for up to 60 s until `arm_controller` really reports `active`. On timeout it names the most likely cause (robot stuck in the ground plane → physics rate collapses → activation times out).
+- Step 8 polls for up to 40 s until `/compute_ik` exists (without it, all 6D pose targets fail).
+- At the end it checks whether `rail_joint` actually appears in `/joint_states`. That is the single best indicator that the 6-DOF setup is live.
+
+## Two pitfalls found while testing the script
+
+**`pkill` killed itself.** The cleanup ran as `bash -c 'pkill -9 -f "ign gazebo"; pkill -9 -f rviz2; ...'`. The pattern text is part of that shell's own command line, so the first `pkill` matched the shell itself and killed it — Gazebo died, but `move_group`, `rviz2` and `robot_state_publisher` survived. Fix: the bracket trick in every pattern (`"[i]gn gazebo"`), which matches the real process but not the pattern string itself.
+
+**Terminal windows may be blocked.** The script opens one macOS Terminal window per launch via `osascript`. If macOS denies the Apple Event (error `-1743`, missing Automation permission), the launches now fall back to running detached inside the container, so the stack still comes up. To get real windows: *System Settings → Privacy & Security → Automation*, and allow the terminal app to control Terminal.
+
+## After startup
+
+| What | Where |
+|------|-------|
+| Desktop (Gazebo, RViz) | [localhost:6080](http://localhost:6080/vnc.html), password `ros` |
+| Web GUI (`rail_joint` in meters, 6D pose) | [localhost:3000](http://localhost:3000) |
+
+Run the waypoint sequence:
+```bash
+docker exec -it lerobot_container /bin/bash -ic "source /opt/ros/humble/setup.bash && source /workspace/lerobot/install/setup.bash && python3 /workspace/waypoint_runner.py"
+```
+
+Shut everything down (the running stack uses several hundred percent CPU):
+```bash
+docker compose stop
+```
+
+# July 29 Addendum: TCP Tool Frame (fixes the "axes are off" problem)
+
+## The symptom
+
+Commanding a pose and reading it back gave completely different orientation numbers:
+
+| | commanded | GUI showed |
+|---|-----------|------------|
+| Waypoint 2 | roll 113.5, pitch -90, yaw 120 | roll -0.21, pitch -90, yaw -126.29 |
+| back to waypoint 1 | roll -156.5, pitch -90, yaw 66.5 | roll 65.54, pitch -90, yaw -155.54 |
+
+Driving to the *same* commanded pose twice even produced *different* displayed values.
+
+## The cause: gimbal lock, not a control error
+
+The rotations were in fact identical - verified by converting both triples to
+quaternions and comparing (dot product = 1.000000). At `pitch = ±90°` the Euler
+decomposition is singular: roll and yaw axes coincide, so only the **sum
+`roll + yaw`** is defined and the individual values can be split arbitrarily.
+
+Check the sums: -156.5 + 66.5 = **-90**, and 65.54 - 155.54 = **-90**. Same rotation.
+For waypoint 2: 113.5 + 120 = 233.5 and -0.21 - 126.29 = -126.5, which differ by
+exactly 360°. Also the same rotation.
+
+Why was pitch *always* exactly -90? Because the `gripper` link frame comes from CAD
+with its **X axis pointing straight up**. In the ROS convention `R[2][0] = -sin(pitch)`,
+so a vertical X axis forces `pitch = -90°`. The setup was therefore **permanently
+parked in the singularity**, which is why roll/yaw were never reproducible.
+
+Measured at the home pose, the gripper axes pointed like this:
+
+| gripper axis | direction in `world` |
+|--------------|----------------------|
+| X | +Z (up)  ← causes the singularity |
+| Y | +X |
+| Z | +Y |
+
+## The fix: a `tcp` frame with the standard tool convention
+
+Instead of commanding the `gripper` link, there is now a dedicated tool frame.
+The approach direction was derived from the mesh geometry rather than guessed: the
+jaw extends from `gripper z = -0.013` to `-0.105`, so the gripper approaches along
+**gripper -Z**. (Consistent with joint `5` rotating about `gripper-Z` - the classic
+wrist roll about the approach axis.)
+
+```xml
+<link name="tcp" />
+<joint name="gripper_to_tcp" type="fixed">
+    <parent link="gripper" /><child link="tcp" />
+    <origin xyz="0 0 -0.090" rpy="3.14159 0 1.5708" />
+</joint>
+```
+
+| TCP axis | equals | meaning |
+|----------|--------|---------|
+| Z | gripper -Z | approach direction, out of the gripper |
+| X | gripper +Y | horizontal → **out of the singularity** |
+| Y | gripper +X | |
+
+The origin sits on the approach axis at 9 cm, i.e. at the grasp point just short of
+the fingertip (10.5 cm).
+
+## Result
+
+| | before (`gripper`) | after (`tcp`) |
+|--|--------------------|---------------|
+| home position | (-0.009, -0.277, 0.282) | (-0.009, **-0.367**, 0.282) |
+| home RPY | (-156.5, **-90.0**, 66.5) | (**+90.0, 0.0, 0.0**) |
+
+Round-trip test: commanded (70, 15, 25) came back as (70.67, 14.58, 25.16) - under
+1° deviation (IK tolerance plus controller settling). Previously commanded and
+displayed values were 222° apart.
+
+**Note:** `roll = 90°` at the home pose is not an offset. `RPY = (0,0,0)` would mean
+the TCP axes coincide with the world axes, i.e. the gripper pointing *straight up*.
+At home it points horizontally forward (`world -Y`), which is exactly a 90° rotation
+about X.
+
+## Changed files
+
+- `so101_base.xacro`: added `tcp` link + fixed joint `gripper_to_tcp`.
+- `so101.srdf`: `gripper_to_tcp` added to the `arm` group so MoveIt can solve IK for `tcp`.
+- `joint_state_gui.py`: `END_EFFECTOR_FRAME = "tcp"`.
+- `waypoint_runner.py`: `END_EFFECTOR_LINK = "tcp"`.
+- `moveit.rviz`: TF display added (frames `world`, `rail_link`, `carriage_link`, `base`,
+  `tcp`), `Marker Scale 0.45`, and **Fixed Frame changed from `Base` to `world`** -
+  with `base` as reference the world appeared to move whenever the rail travelled.
+
+**Important:** old waypoint numbers are no longer valid. They referred to the
+`gripper` link origin; targets now control the TCP - 9 cm further out and with a
+different axis convention. Easiest way to get new ones: drive the robot, press
+`Fill current`, copy the values.
+
+# July 29 Addendum: Home button in the task-space section
+
+`Reset to 0` made no sense for the end-effector section: position (0,0,0) sits inside
+the base, and an orientation of (0,0,0) would mean the gripper points straight up.
+That button is now **`Home`** and fills the target fields with the pose the robot has
+when every joint is at 0:
+
+```text
+x = -0.0094   y = -0.3675   z = +0.2819   roll = 90   pitch = 0   yaw = 0
+```
+
+Verified by driving all joints to exactly 0 and measuring the TCP.
+
+The values live in a single `HOME_POSE` constant in `joint_state_gui.py` and are
+injected into the page via a placeholder, so Python and JavaScript cannot drift apart.
+In the joint-space section `Reset to 0` stays as it is - there it is meaningful.
+
+## Two debugging lessons from this session
+
+- **`ros2 topic echo /joint_states` is only a snapshot.** Several confusing readings
+  turned out to be samples taken *during* a motion. When measuring a pose, take
+  multiple samples and only trust values that stay constant.
+- **RViz overwrites its config file on a clean exit.** Kill RViz hard before editing
+  `moveit.rviz`, otherwise the old configuration is written back over the change.

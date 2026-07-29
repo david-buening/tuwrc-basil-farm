@@ -29,6 +29,7 @@ are defined
         <joint name="3" />
         <joint name="4" />
         <joint name="5" />
+        <joint name="gripper_to_tcp" />
     </group>
     <group name="gripper">
         <joint name="6" />

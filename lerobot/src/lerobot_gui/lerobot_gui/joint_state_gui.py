@@ -23,9 +23,19 @@ LINEAR_JOINTS = {"rail_joint"}  # prismatic, values in meters (not radians)
 # Pose reference frame: must be a FIXED frame. "base" moves with the rail
 # carriage now, so targets/display are expressed in "world" instead.
 BASE_FRAME = "world"
-END_EFFECTOR_FRAME = "gripper"
+END_EFFECTOR_FRAME = "tcp"  # tool frame: Z = approach direction, avoids gimbal lock
 MOVEIT_IK_SERVICE = "/compute_ik"
 MOVEIT_GROUP = "arm"
+
+# TCP pose with every joint at 0 (matches the "home" group state in the SRDF).
+# Position in meters, orientation in degrees, expressed in BASE_FRAME (world).
+# Used by the "Home" button in the task-space section - resetting that section
+# to 0/0/0 would be meaningless (that point sits inside the base, and an
+# orientation of 0/0/0 would mean the gripper points straight up).
+HOME_POSE = {
+    "x": -0.0094, "y": -0.3675, "z": 0.2819,
+    "roll": 90.0, "pitch": 0.0, "yaw": 0.0,
+}
 
 # (min_deg, max_deg) from URDF limits
 JOINT_LIMITS_DEG = {
@@ -228,7 +238,7 @@ HTML_PAGE = """<!doctype html>
           <input type="number" id="pose-duration" class="duration-input"
                  value="2.0" min="0.1" max="10" step="0.1">
         </label>
-        <button class="btn btn-ghost"      id="pose-zero-btn">Reset to 0</button>
+        <button class="btn btn-ghost"      id="pose-home-btn">Home</button>
         <button class="btn btn-secondary"  id="pose-fill-btn">Fill current</button>
         <button class="btn btn-primary"    id="pose-send-btn">Send</button>
         <span class="feedback" id="pose-feedback"></span>
@@ -257,7 +267,8 @@ HTML_PAGE = """<!doctype html>
     const poseSectionEl = document.getElementById("pose-section");
     const poseFrameEl = document.getElementById("pose-frame");
     const poseFillBtn = document.getElementById("pose-fill-btn");
-    const poseZeroBtn = document.getElementById("pose-zero-btn");
+    const poseHomeBtn = document.getElementById("pose-home-btn");
+    const HOME_POSE   = __HOME_POSE__;   // injected by the server
     const poseSendBtn = document.getElementById("pose-send-btn");
     const poseFeedbackEl = document.getElementById("pose-feedback");
 
@@ -386,13 +397,15 @@ HTML_PAGE = """<!doctype html>
 
     poseFillBtn.addEventListener("click", fillPoseTargetsFromCurrent);
 
-    poseZeroBtn.addEventListener("click", () => {
-      document.getElementById("pose-target-x").value = "0.0000";
-      document.getElementById("pose-target-y").value = "0.0000";
-      document.getElementById("pose-target-z").value = "0.0000";
-      document.getElementById("pose-target-roll").value  = "0.0000";
-      document.getElementById("pose-target-pitch").value = "0.0000";
-      document.getElementById("pose-target-yaw").value   = "0.0000";
+    // Fill the task-space targets with the pose the robot has when every joint
+    // is at 0. Sending it moves the arm back to its home posture.
+    poseHomeBtn.addEventListener("click", () => {
+      document.getElementById("pose-target-x").value = HOME_POSE.x.toFixed(4);
+      document.getElementById("pose-target-y").value = HOME_POSE.y.toFixed(4);
+      document.getElementById("pose-target-z").value = HOME_POSE.z.toFixed(4);
+      document.getElementById("pose-target-roll").value  = HOME_POSE.roll.toFixed(2);
+      document.getElementById("pose-target-pitch").value = HOME_POSE.pitch.toFixed(2);
+      document.getElementById("pose-target-yaw").value   = HOME_POSE.yaw.toFixed(2);
     });
 
     poseSendBtn.addEventListener("click", async () => {
@@ -669,7 +682,8 @@ def make_request_handler(store: JointStateStore, node: JointStateNode):
             return
 
         def _send_html(self):
-            body = HTML_PAGE.encode("utf-8")
+            page = HTML_PAGE.replace("__HOME_POSE__", json.dumps(HOME_POSE))
+            body = page.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))

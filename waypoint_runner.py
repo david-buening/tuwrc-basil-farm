@@ -66,10 +66,10 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 # The values below are only EXAMPLES. Replace them with poses that are
 # reachable for your setup (read them from the web GUI via "Fill current").
 WAYPOINTS = [
-    (0.00, -0.2775, 0.2819, -156.5, -90.0, 66.5),   # start / centered on the rail
-    (0.20, -0.1775, 0.2819, 113.5, -90.0, 120),   # tilt the wrist (pitch -90 -> -70)
-    (-0.20, -0.2775, 0.2819, 113.5, -90.0, 180),  # slide to the other side (-X)
-    (0.00, -0.2775, 0.2819, -156.5, -90.0, 66.5),   # back to start
+    (0.10, -0.2775, 0.2819, -156.5, -90.0, 66.5),   # start / centered on the rail
+    #(0.20, -0.1775, 0.2819, 113.5, -90.0, 120),   # tilt the wrist (pitch -90 -> -70)
+    #(-0.20, -0.2775, 0.2819, 113.5, -90.0, 180),  # slide to the other side (-X)
+   # (0.00, -0.2775, 0.2819, -156.5, -90.0, 66.5),   # back to start
 ]
 
 # How long (seconds) each move should take. Larger = slower & smoother.
@@ -82,7 +82,7 @@ DWELL_TIME = 1.0
 # Fixed project settings (normally no need to touch these).
 # ---------------------------------------------------------------------------
 POSE_FRAME = "world"                 # fixed reference frame for all targets
-END_EFFECTOR_LINK = "gripper"        # link whose pose we control
+END_EFFECTOR_LINK = "tcp"            # tool frame: Z = approach direction
 MOVEIT_GROUP = "arm"                 # planning group (rail_joint + joints 1..5)
 IK_SERVICE = "/compute_ik"           # MoveIt inverse-kinematics service
 ARM_TRAJECTORY_TOPIC = "/arm_controller/joint_trajectory"
